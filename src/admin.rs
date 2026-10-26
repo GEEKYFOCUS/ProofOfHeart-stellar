@@ -1,7 +1,9 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::errors::Error;
-use crate::lifecycle::{assert_admin, get_campaign_or_error, require_active_campaign};
+use crate::lifecycle::{
+    assert_admin, get_campaign_or_error, require_active_campaign, require_not_paused,
+};
 use crate::storage::{
     self, bump_instance_ttl, get_active_campaign_count, get_admin, get_approval_threshold_bps,
     get_max_campaign_funding_goal, get_min_campaign_funding_goal, get_min_votes_quorum,
@@ -91,7 +93,7 @@ pub(crate) fn unpause(env: &Env) -> Result<(), Error> {
 pub(crate) fn set_creation_disabled_fn(env: &Env, disabled: bool) -> Result<(), Error> {
     let admin = get_admin(env);
     assert_admin(env, &admin)?;
-    // No require_not_paused: admin must be able to gate campaign creation even during pause (#388).
+    require_not_paused(env)?;
     bump_instance_ttl(env);
     set_creation_disabled(env, disabled);
     env.events()
@@ -106,7 +108,7 @@ pub(crate) fn set_voting_params(
     approval_threshold_bps: u32,
 ) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: admin must be able to adjust voting parameters during pause (#388).
+    require_not_paused(env)?;
     bump_instance_ttl(env);
     let old_quorum = get_min_votes_quorum(env, voting::DEFAULT_MIN_VOTES_QUORUM);
     let old_threshold = get_approval_threshold_bps(env, voting::DEFAULT_APPROVAL_THRESHOLD_BPS);
@@ -158,7 +160,7 @@ pub(crate) fn set_min_voting_balance_fn(
 pub(crate) fn update_platform_fee(env: &Env, new_fee: u32) -> Result<(), Error> {
     let admin = get_admin(env);
     assert_admin(env, &admin)?;
-    // No require_not_paused: admin must be able to adjust fees during an emergency pause (#388).
+    require_not_paused(env)?;
     if new_fee > crate::PLATFORM_FEE_MAX_BPS {
         return Err(Error::InvalidPlatformFee);
     }
@@ -176,7 +178,7 @@ pub(crate) fn set_campaign_fee_override(
     fee_bps: u32,
 ) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: per-campaign fee overrides are admin governance (#388).
+    require_not_paused(env)?;
     let mut campaign = get_campaign_or_error(env, campaign_id)?;
     if fee_bps > crate::PLATFORM_FEE_MAX_BPS {
         return Err(Error::ValidationFailed);
@@ -226,7 +228,7 @@ pub(crate) fn set_min_campaign_funding_goal_fn(
     min_goal: i128,
 ) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: funding goal limits are admin governance (#388).
+    require_not_paused(env)?;
     if min_goal <= 0 {
         return Err(Error::FundingGoalMustBePositive);
     }
@@ -246,7 +248,7 @@ pub(crate) fn set_max_campaign_funding_goal_fn(
     max_goal: i128,
 ) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: funding goal limits are admin governance (#388).
+    require_not_paused(env)?;
     if max_goal <= 0 {
         return Err(Error::FundingGoalMustBePositive);
     }
@@ -354,7 +356,7 @@ pub(crate) fn initiate_admin_transfer(
     new_admin: Address,
 ) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: admin transfer is the critical recovery path during an emergency (#388).
+    require_not_paused(env)?;
 
     let current_admin = get_admin(env);
     if new_admin == current_admin {
@@ -375,7 +377,8 @@ pub(crate) fn initiate_admin_transfer(
 }
 
 pub(crate) fn accept_admin_transfer(env: &Env) -> Result<(), Error> {
-    // No require_not_paused: accepting an admin transfer is part of the emergency recovery path (#388).
+    require_not_paused(env)?;
+
     let pending_admin = get_pending_admin(env).ok_or(Error::NoTransferPending)?;
     pending_admin.require_auth();
 
@@ -391,7 +394,7 @@ pub(crate) fn accept_admin_transfer(env: &Env) -> Result<(), Error> {
 
 pub(crate) fn cancel_admin_transfer(env: &Env, admin: Address) -> Result<(), Error> {
     assert_admin(env, &admin)?;
-    // No require_not_paused: cancelling an admin transfer must be available during pause (#388).
+    require_not_paused(env)?;
 
     if get_pending_admin(env).is_none() {
         return Err(Error::NoTransferPending);
